@@ -1,4 +1,6 @@
-# Turtle PvP's Core (discontinued)
+# PvP Core
 
-Permsions  
-`events.turtleclient.bypassinteract` = bypass cancelling all blocks  / interactions
+**Permission**
+```
+events.turtleclient.bypassinteract` = bypass cancelling all blocks  / interactions
+```

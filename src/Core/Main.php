@@ -2,27 +2,34 @@
 
 namespace Core;
 
+use Core\Errors;
+use Core\Events\TurtleAddPlayerToQueueEvent;
+use Core\Games\Duels;
 use Core\Main as Core;
 use Core\BossBar\BossBar;
-use Core\Errors;
 use Core\Events\TurtleGameEnterEvent;
-use Core\Functions\CustomTask;
+use Core\Functions\{AsyncDeleteDir, AsyncDeleteMap, Countdown, CustomTask, AsyncCreateMap};
 use Core\Games\FFA;
-use ethaniccc\NoDebuffBot\Bot;
+use Core\Entities\Bot;
+use libReplay\ReplayServer;
+use Party\PartyHandler;
+use pocketmine\entity\Entity;
 use pocketmine\event\entity\EntityDamageEvent;
+use pocketmine\level\Level;
 use pocketmine\math\Vector3;
 use pocketmine\network\mcpe\protocol\BookEditPacket;
 use pocketmine\network\mcpe\protocol\LevelEventPacket;
+use pocketmine\network\mcpe\protocol\types\GameMode;
 use pocketmine\Player;
 use pocketmine\plugin\PluginBase;
 use pocketmine\event\Listener;
 use pocketmine\event\player\{PlayerJoinEvent, PlayerChatEvent, PlayerCreationEvent, PlayerMoveEvent, PlayerQuitEvent};
 use pocketmine\event\block\{BlockBreakEvent, BlockPlaceEvent};
 use pocketmine\event\entity\EntityDamageByEntityEvent;
-use Core\Game\{Game, Modes, ModesManager, Games, GamesManager};
+use Core\Game\{DuelQueues, Game, Modes, ModesManager, GamesManager};
+use Core\Game\GamesManager as Games;
 use Core\Events\TurtleGameEndEvent;
 use Core\Functions\DeleteBlock;
-use Party;
 use pocketmine\utils\Config;
 
 class Main extends PluginBase implements Listener
@@ -46,19 +53,24 @@ class Main extends PluginBase implements Listener
     public GamesManager $game;
 
     /**
-     * @var array|Game
+     * @var PartyHandler
      */
-    public $runningGames = [];
+    public PartyHandler $partyHandler;
 
     /**
-     * @var Party|array
+     * @var Game|array
      */
-    public $parties = [];
+    public $runningGames = [];
 
     /**
      * @var Config
      */
     private Config $arenas;
+
+    /**
+     * @var DuelQueues
+     */
+    public DuelQueues $DuelQueues;
 
 
     /**
@@ -69,21 +81,31 @@ class Main extends PluginBase implements Listener
         self::$instance = $this;
 
         if (!is_file($this->getDataFolder() . "arenas/config.yml")) {
+
             $this->saveDefaultConfig();
         }
 
         $this->arenas = new Config($this->getDataFolder() . "arenas/config.yml", Config::YAML, array());
         $this->getServer()->getPluginManager()->registerEvents($this, $this);
+
         if (!is_dir($this->getDataFolder())) {
             @mkdir($this->getDataFolder());
         }
-        $fist = new Game(null, Games::FFA, Modes::FIST, 'fist');
-        $sumo = new Game(null, Games::FFA, Modes::SUMO, 'sumo');
+
+        $fist = new Game(null, GamesManager::FFA, ModesManager::FIST, 'fist');
+        $sumo = new Game(null, GamesManager::FFA, ModesManager::SUMO, 'sumo');
         $this->addRunningGame($fist, 'fist-ffa');
         $this->addRunningGame($sumo, 'sumo-ffa');
+
         $this->getServer()->getPluginManager()->registerEvents($this, $this);
         $eventHandler = new Events($this);
         $eventHandler->registerEvents();
+
+        Entity::registerEntity(Bot::class, true);
+
+        $e =  new DuelQueues();
+        $e->setup();
+        $this->DuelQueues = $e;
 
     }
 
@@ -93,7 +115,7 @@ class Main extends PluginBase implements Listener
      */
     public function playerClass(PlayerCreationEvent $e)
     {
-        $e->setPlayerClass(\TurtlePlayer::class);
+        $e->setPlayerClass(TurtlePlayer::class);
     }
 
 
@@ -164,6 +186,18 @@ class Main extends PluginBase implements Listener
         $game = new Game($players, $type, $mode, $id);
         $this->addRunningGame($game, $name);
 
+        if($game->getType() == Games::BOT){
+
+            foreach ($players as $player) {
+                if ($player instanceof TurtlePlayer) {
+                    $yes = $player;
+                 }
+                }
+
+                $this->createMap($yes, Utils::getRandomMap());
+
+        }
+
         return $game;
     }
 
@@ -180,7 +214,8 @@ class Main extends PluginBase implements Listener
      */
     public function onJoin(PlayerJoinEvent $e)
     {
-        $e->getPlayer()->teleport(new Vector3(0, 0, 0, 0, 0, $this->getServer()->getLevelByName("lobby")));
+        $e->getPlayer()->teleport(new Vector3(0, 20, 0, 0, 0, $this->getServer()->getLevelByName("lobby")));
+
         try {
             $bossbar = new BossBar();
             $bossbar->setTitle("Turtle PvP " . $e->getPlayer()->getGame());
@@ -190,6 +225,22 @@ class Main extends PluginBase implements Listener
             $bossbar->setTitle("Playing on turtle pvp");
             $bossbar->addPlayer($e->getPlayer());
         }
+
+        $e->getPlayer()->initializeLobby();
+
+
+        if(!is_file($this->getDataFolder() . 'plugin_data/' . 'Core/' . $e->getPlayer()->getName() . '.json')){
+
+            $e->getPlayer()->buildConfigClass($type = false);
+            $file = fopen($this->getDataFolder() . 'plugin_data/' . 'Core/' . $e->getPlayer()->getName() . '.json', "w+");
+            fwrite($file, json_encode($e->getPlayer()->getConfig()));
+            fclose($file);
+
+
+        } else {
+            $e->getPlayer()->buildConfigClass();
+        }
+
     }
 
 
@@ -199,6 +250,7 @@ class Main extends PluginBase implements Listener
     public function onDeath(EntityDamageByEntityEvent $e)
     {
         $victim = $e->getEntity();
+
         if ($victim instanceof Player) {
             if ($victim->isOnline()) {
                 if ($e->getFinalDamage() >= $victim->getHealth()) {
@@ -215,8 +267,6 @@ class Main extends PluginBase implements Listener
                                 $victim->initializeLobby();
                             }
 
-                        } elseif ($victim instanceof Bot) {
-                            $victim->flagForDespawn();
                         }
                     } else {
                         $victim->sendMessage("Error encountered. ERROR CODE 4: " . Errors::CODE_4);
@@ -236,20 +286,49 @@ class Main extends PluginBase implements Listener
         $minigame = $game->getType();
         $mode = $game->getMode();
 
+            $ffa = GamesManager::FFA;
+            $kbffa = GamesManager::KBFFA;
+            $bot_ = GamesManager::BOT;
+            $duel = GamesManager::DUEL;
 
-        if (Core::getInstance()->getModesManager()->validate($mode) && Core::getInstance()->getGamesManager()->validate($minigame)) {
-            if ($minigame == Core::getInstance()->getGamesManager()::FFA) {
-                Core::getInstance()->getGamesManager()->getFFAManager()->initializeGame($this, $game);
-                $game->addPlayer($e->getPlayer());
-            } elseif ($minigame == Core::getInstance()->getGamesManager()::KBFFA) {
-                Core::getInstance()->getGamesManager()->getKBFFAManager()->initializeGame($this, $game);
-                $game->addPlayer($e->getPlayer());
-            } elseif ($minigame == GamesManager::BOT) {
-                echo 'coming soon';
+            switch($minigame) {
+
+                case $ffa:
+
+                    Core::getInstance()->getGamesManager()->getFFAManager()->initializeGame($this, $game);
+                    $game->addPlayer($e->getPlayer());
+                    break;
+
+                case $kbffa:
+
+
+                    Core::getInstance()->getGamesManager()->getKBFFAManager()->initializeGame($this, $game);
+                    $game->addPlayer($e->getPlayer());
+                    break;
+
+                case $bot_:
+
+                    foreach ($e->getGame()->getPlayers() as $players) {
+                        if ($players instanceof Bot) {
+                            $bot = $players;
+                        }
+                    }
+
+                    Duels::initializeBotGame($e->getPlayer(), $bot, $e->getGame());
+                    break;
+
+                case $duel:
+
+                    foreach($e->getGame()->getPlayers() as $players)
+                    {
+                        $players->setGamemode(GameMode::SURVIVAL_VIEWER);
+                    }
+                    break;
+
+                default:
+                    $e->getPlayer()->sendMessage("Error encountered. ERROR CODE 3: " . Errors::CODE_3);
+                    break;
             }
-        } else {
-            $e->getPlayer()->sendMessage("Error encountered. ERROR CODE 3: " . Errors::CODE_3);
-        }
 
         try {
             $bossbar = new BossBar();
@@ -272,12 +351,16 @@ class Main extends PluginBase implements Listener
         $e->getGame()->removePlayer($e->getGamePlayers());
 
         if ($e->getGame()->getType() == GamesManager::BOT) {
+
             if ($winner = $e->getWinner() instanceof TurtlePlayer) {
                 $winner->initializeLobby();
             } elseif ($looser = $e->getLoser() instanceof TurtlePlayer) {
                 $looser->initializeLobby();
             }
+
         }
+
+
 
         //gib winner kills, etc.
 
@@ -363,6 +446,44 @@ class Main extends PluginBase implements Listener
 
     }
 
+    public function queued(TurtleAddPlayerToQueueEvent $e){
+
+        $duelQueue = $e->getQueue();
+
+      if(array_count_values($duelQueue->getQueue()) < 0){
+
+          $p = $e->getPlayer();
+          foreach($duelQueue->getQueue() as $players){
+              if($players !== $p){
+                  $o = $players;
+              }
+          }
+          $game = $this->createGame($duelQueue->getQueue(), GamesManager::DUEL, ModesManager::NODEBUFF, Utils::buildID($p, $o), Utils::buildID($p, $o));
+
+
+              $p->setGame($game);
+
+              $map = $this->createMap($p, Utils::getRandomMap());
+
+              foreach($duelQueue->getQueue() as $players){
+                  $players->teleport($map->getSafeSpawn());
+                  $duelQueue->removePlayerFromQueue($players);
+                  $event = new TurtleGameEnterEvent($players, $game);
+                  $event->call();
+              }
+
+
+          $this->getScheduler()->scheduleDelayedTask(new Countdown(3, "Spawning in...", "3 seconds", $game, $p, true), 20 * 1);
+          $this->getScheduler()->scheduleDelayedTask(new Countdown(2, "Spawning in...", "2 seconds", $game, $p, true), 20 * 2);
+          $this->getScheduler()->scheduleDelayedTask(new Countdown(1, "Spawning in...", "1 seconds", $game, $p, true), 20 * 3);
+          $this->getScheduler()->scheduleDelayedTask(new Countdown(0, "Spawning in...", "0 seconds", $game, $p, true), 20 * 4);
+
+
+
+
+      }
+    }
+
     /**
      * @param EntityDamageEvent $e
      */
@@ -388,11 +509,25 @@ class Main extends PluginBase implements Listener
     {
         $d = $e->getDamager();
         $p = $e->getEntity();
-        $p->setTagged($d);
-        $p->sendMessage("You're now combat logged.");
-        $task = $p->setTagged(null);
-        $this->getScheduler()->scheduleDelayedTask(new CustomTask($task), 20 * 10);
-    }
+        if($d instanceof TurtlePlayer) {
+            if($d->getConfig()->deviceQueuing == "true" or $p->getConfig()->deviceQueuing == "true") {
+                $p->setTagged($d);
+                $p->sendMessage("You're now combat logged.");
+                $task = $p->setTagged(null);
+                $this->getScheduler()->scheduleDelayedTask(new CustomTask($task), 20 * 10);
+            }
+        }
+
+        if($d instanceof TurtlePlayer && $p instanceof TurtlePlayer){
+
+            if($d->getConfig()->deviceQueuing == "true" or $p->getConfig()->deviceQueuing == "true") {
+                if ($d->getDeviceOS() !== $p->getDeviceOS()) {
+                    $d->sendMessage("You cannot hit a player that you're not on the same OS with! (They have Device Queuing on!)");
+                    $e->setCancelled();
+                }
+            }
+         }
+     }
 
     public function onQuit(PlayerQuitEvent $e)
     {
@@ -411,64 +546,16 @@ class Main extends PluginBase implements Listener
     }
 
     /**
-     * @param Party $party
-     * Unsets a party. Used by Party::delete()
-     */
-    public function deleteParty(Party $party)
-    {
-        unset($party);
-    }
-
-
-    /**
-     * @param Player $owner
-     * Creates a party.
-     */
-    public function createParty(Player $owner)
-    {
-
-        $party = new Party($owner);
-        $this->parties[] = $party;
-
-    }
-
-    /**
-     * @return Party
-     * Returns all the current parties.
-     */
-    public function getParties(): Party
-    {
-        return $this->parties;
-    }
-
-
-    /**
      * @param TurtlePlayer $player
      * @param $folderName
-     * @return \pocketmine\level\Level|null
+     * @return Level
      */
-    public function createMap(TurtlePlayer $player, $folderName)
+    public function createMap(TurtlePlayer $player, $folderName): Level
     {
-        $mapname = $folderName . "-" . $player->getName();
+       $create = new AsyncCreateMap($player, $folderName, $this);
+       $create->run();
 
-        $zipPath = $this->getServer()->getDataPath() . "plugin_data/ClutchCore/" . $folderName . ".zip";
-
-        if (file_exists($this->getServer()->getDataPath() . "worlds" . DIRECTORY_SEPARATOR . $mapname)) {
-            $this->deleteMap($player, $folderName);
-        }
-
-        $zipArchive = new \ZipArchive();
-        if ($zipArchive->open($zipPath) == true) {
-            $zipArchive->extractTo($this->getServer()->getDataPath() . "worlds");
-            $zipArchive->close();
-            $this->getLogger()->notice("Zip Object created!");
-        } else {
-            $this->getLogger()->notice("Couldn't create Zip Object!");
-        }
-
-        rename($this->getServer()->getDataPath() . "worlds" . DIRECTORY_SEPARATOR . $folderName, $this->getServer()->getDataPath() . "worlds" . DIRECTORY_SEPARATOR . $mapname);
-        $this->getServer()->loadLevel($mapname);
-        return $this->getServer()->getLevelByName($mapname);
+       return $create->getLevel();
     }
 
     /**
@@ -478,22 +565,9 @@ class Main extends PluginBase implements Listener
      */
     public function deleteMap(TurtlePlayer $player, $folderName): void
     {
-        $mapName = $folderName . "-" . $player->getName();
-        if (!$this->getServer()->isLevelGenerated($mapName)) {
 
-            return;
-        }
-
-        if (!$this->getServer()->isLevelLoaded($mapName)) {
-
-            return;
-        }
-
-        $this->getServer()->unloadLevel($this->getServer()->getLevelByName($mapName));
-        $folderName = $this->getServer()->getDataPath() . "worlds" . DIRECTORY_SEPARATOR . $mapName;
-        $this->removeDirectory($folderName);
-
-        $this->getLogger()->notice("World has been deleted for player called " . $player->getName());
+        $delete = new AsyncDeleteMap($player, $folderName, $this);
+        $delete->run();
 
     }
 
@@ -503,11 +577,29 @@ class Main extends PluginBase implements Listener
      */
     public function removeDirectory($path): void
     {
-        $files = glob($path . '/*');
-        foreach ($files as $file) {
-            is_dir($file) ? $this->removeDirectory($file) : unlink($file);
-        }
-        rmdir($path);
-        return;
+
+        $delete = new AsyncDeleteDir($path, $this);
+        $delete->run();
+
     }
+
+    /**
+     * @return DuelQueues
+     */
+    public function getDuelQueues(): DuelQueues
+    {
+
+        return $this->DuelQueues;
+
+    }
+
+    /**
+     * @return PartyHandler
+     */
+    public function getPartyHandler(): PartyHandler
+    {
+        return $this->partyHandler;
+    }
+
+
 }

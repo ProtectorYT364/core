@@ -26,20 +26,29 @@ class Game{
     /**@var bool*/
     public bool $finished = false;
 
+    /**
+     * @var null|string
+     */
+    public $difficulty = null;
+
 
     /**
      * Game constructor.
-     * @param array $players
+     * @param array|null $players
      * @param $type
      * @param $mode
      * @param $id
      */
-    public function __construct(array $players, $type, $mode, $id){
+    public function __construct(array|null $players, $type, $mode, $id, $difficulty = null){
 
     $this->type = $type;
     $this->mode = $mode;
     $this->players = $players;
     $this->id = $id;
+
+    if($difficulty != null){
+        $this->difficulty = $difficulty;
+    }
 
     }
 
@@ -130,6 +139,14 @@ class Game{
      */
     public function setState(bool $state){
     $this->finished = $state;
+    }
+
+    /**
+     * get bot difficulty
+     * @return string
+     */
+    public function getDifficulty(): string{
+        return $this->difficulty;
     }
 
 

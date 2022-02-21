@@ -6,6 +6,7 @@ use Core\Main as Core;
 use Core\Errors;
 use Core\Events\TurtleGameEnterEvent;
 use Core\Game\Game;
+use Party\Party;
 use pocketmine\Player;
 use pocketmine\level\Location;
 use pocketmine\nbt\tag\CompoundTag;
@@ -16,7 +17,7 @@ use pocketmine\network\SourceInterface;
 use Core\Functions\RespawnSystem;
 use Core\Games\FFA;
 use Core\Game\Modes;
-use Core\Game\Games;
+use Core\Game\GamesManager as Games;
 use Core\Games\KnockbackFFA;
 
 
@@ -26,27 +27,37 @@ class TurtlePlayer extends Player{
      * @var bool $respawning
      * Variable to see if player is in respawn status.
      */
-    public $respawning = false;
+    public bool $respawning = false;
 
     /**
      * @var null|Player $tag
      */
-    public $tag = null;
+    public null|Player $tag = null;
 
     /**
      * @var null|string $kb
      */
-    public $kb = null;
+    public null|string $kb = null;
 
     /**
      * @var null|Game $game
      */
-    public $game = null;
+    public null|Game $game = null;
+
+    /**
+     * @var PlayerConfig
+     */
+    public PlayerConfig $config;
 
     /**
      * @var string $actualNameTag
      */
     public string $actualNameTag;
+
+    /**
+     * @var Party
+     */
+    public Party $party;
 
     public function __construct(SourceInterface $interface, $ip, $port)
     {
@@ -79,6 +90,7 @@ class TurtlePlayer extends Player{
     public function unsetGame(){
         unset($this->game);
     }
+
 
     /**
      * @param Game $game
@@ -182,7 +194,8 @@ class TurtlePlayer extends Player{
                         $this->sendMessage("Error Encountered. ERROR CODE 9: " . Errors::CODE_9);
                     }
             }
-        }else{
+        } else {
+
             $players = $this->getServer()->getOnlinePlayers();
             foreach ($players as $player)
                 $this->showPlayer($player);
@@ -226,6 +239,105 @@ class TurtlePlayer extends Player{
     public function getZ()
     {
         return $this->getZ();
+    }
+
+    /**
+     * @return PlayerConfig
+     * get config
+     */
+    public function getConfig(): PlayerConfig{
+        return $this->config;
+    }
+
+    /**
+     * save config
+     */
+    public function saveConfig(){
+
+        $config = json_encode($this->getConfig());
+        $thefile = fopen(Main::getInstance()->getDataFolder(). 'plugin_data/' . 'Core/' . $this->getName() . '.json', "w+");
+        fwrite($thefile, $config);
+        fclose($thefile);
+
+    }
+
+    /**
+     * @param string $type
+     */
+    public function setConfigByType(string $type){
+
+        foreach($this->getConfig()->configs as $configs){
+            if($configs == $type){
+                $configs = $type;
+            }
+        }
+    }
+
+    /**
+     * build the config class ($this->config) from .json
+     * @param bool $type
+     */
+    public function buildConfigClass(bool $type = true){
+
+        $playerConfigClass = new PlayerConfig();
+
+        if ($type) {
+
+            $thefile = fopen(Main::getInstance()->getDataFolder() . 'plugin_data/' . 'Core/' . $this->getName() . '.json', "w+");
+
+            $jsonData = file_get_contents($thefile);
+            $phpClass = json_decode($jsonData);
+
+            $playerConfigClass->deviceQueuing = $phpClass->deviceQueuing;
+            $playerConfigClass->javaInventory = $phpClass->javaInventory;
+
+            $this->config = $playerConfigClass;
+
+        } else {
+
+            $playerConfigClass->deviceQueuing = "false";
+            $playerConfigClass->javaInventory = "true";
+
+            $this->config = $playerConfigClass;
+
+        }
+
+    }
+
+    /**
+     * @param Party $party
+     */
+    public function setParty(Party $party){
+        $this->party = $party;
+    }
+
+    /**
+     * remov
+     */
+    public function removeParty(){
+        unset($this->party);
+    }
+
+    /**
+     * @return Party|null
+     */
+    public function getParty(): Party|null{
+        if($this->partyExists()){
+            return $this->party;
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * @return bool
+     */
+    public function partyExists(): bool{
+        if(isset($this->party)){
+            return true;
+        } else {
+            return false;
+        }
     }
 
 }

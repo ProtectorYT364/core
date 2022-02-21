@@ -1,7 +1,9 @@
 <?php
 
-namespace ethaniccc\NoDebuffBot;
+namespace Core\Entities;
 
+use Core\Events\TurtleGameEndEvent;
+use Core\Game\GamesManager;
 use pocketmine\block\Liquid;
 use pocketmine\entity\Attribute;
 use pocketmine\entity\Effect;
@@ -55,17 +57,46 @@ class Bot extends Human{
     private $mode = null;
 
     /**
+     * @var string
+     */
+    private string $difficulty;
+
+    /**
+     * @var int
+     */
+    private int $accuracy;
+
+    /**
+     * @var bool
+     */
+    private bool $disabled = true;
+
+
+
+    /**
      * Bot constructor.
      * @param Level $level
      * @param CompoundTag $nbt
      * @param string $target
      * @param Skin $skin
      * @param string $mode
+     * @param string $difficulty
      */
-    public function __construct(Level $level, CompoundTag $nbt, string $target, string $mode){
+    public function __construct(Level $level, CompoundTag $nbt, string $target, string $mode, string $difficulty){
         parent::__construct($level, $nbt);
+
         $this->target = $target;
         $this->mode = $mode;
+        $this->difficulty = $difficulty;
+
+        if($this->difficulty = GamesManager::DIFFICULTY_EASY){
+            $this->accuracy = 50;
+        }elseif($this->difficulty = GamesManager::DIFFICULTY_MEDIUM){
+            $this->accuracy = 69;
+        }elseif($this->difficulty = GamesManager::DIFFICULTY_HARD){
+            $this->accuracy = 80;
+        }
+
     }
 
     /**
@@ -73,27 +104,6 @@ class Bot extends Human{
      */
     public function getTargetPlayer() : ?Player{
         return Server::getInstance()->getPlayer($this->target);
-    }
-
-    public function giveItems() : void{
-
-        if($this->mode = 'nodebuff') {
-
-            for ($i = 0; $i <= 35; ++$i) {
-                $this->getInventory()->setItem($i, Item::get(Item::SPLASH_POTION, 22, 1));
-            }
-
-            $sword = Item::get(Item::DIAMOND_SWORD);
-            $sword->addEnchantment(new EnchantmentInstance(Enchantment::getEnchantment(Enchantment::FIRE_ASPECT)));
-            $this->getInventory()->setItem(0, $sword);
-            $this->getInventory()->setItem(1, Item::get(Item::ENDER_PEARL, 0, 16));
-            $this->getArmorInventory()->setHelmet(Item::get(Item::DIAMOND_HELMET));
-            $this->getArmorInventory()->setChestplate(Item::get(Item::DIAMOND_CHESTPLATE));
-            $this->getArmorInventory()->setLeggings(Item::get(Item::DIAMOND_LEGGINGS));
-            $this->getArmorInventory()->setBoots(Item::get(Item::DIAMOND_BOOTS));
-            $this->getInventory()->setHeldItemIndex(0);
-
-        }
     }
 
 
@@ -105,10 +115,14 @@ class Bot extends Human{
         $hasUpdate = parent::entityBaseTick($tickDiff);
         if(!$this->isAlive() || $this->getTargetPlayer() === null || !$this->getTargetPlayer()->isAlive()){
             if(!$this->closed) $this->flagForDespawn();
+
+            $event = new TurtleGameEndEvent([$this, $this->getTargetPlayer()], $this->getTargetPlayer(), $this, $this->getTargetPlayer()->getGame());
+            $event->call();
+
             return false;
         }
         $roundedHealth = round($this->getHealth(), 0);
-        $this->setNameTag(TextFormat::BOLD . TextFormat::LIGHT_PURPLE . "NoDebuff " . TextFormat::WHITE . "|| " . TextFormat::RED . "$roundedHealth");
+        $this->setNameTag(TextFormat::BOLD . TextFormat::LIGHT_PURPLE . "Bot\n" . TextFormat::WHITE . "||" . TextFormat::RED . "  $roundedHealth  " . TextFormat::WHITE . "||");
         $position = $this->getTargetPlayer()->asVector3();
         $x = $position->x - $this->getX();
         $z = $position->z - $this->getZ();
@@ -158,19 +172,35 @@ class Bot extends Human{
     }
 
     public function attackTargetPlayer() : void{
+
         if(mt_rand(0, 100) % 4 === 0){
             $this->lookAt($this->getTargetPlayer()->asVector3());
         }
+
         if($this->isLookingAt($this->getTargetPlayer()->asVector3())){
             if($this->distance($this->getTargetPlayer()) <= 3){
                 $this->getInventory()->setHeldItemIndex(0);
-                if(Server::getInstance()->getTick() - $this->potTick >= 5){
-                    $event = new EntityDamageByEntityEvent($this, $this->getTargetPlayer(), EntityDamageEvent::CAUSE_ENTITY_ATTACK, $this->getInventory()->getItemInHand() instanceof Sword ? $this->getInventory()->getItemInHand()->getAttackPoints() : 0.5);
-                    $this->broadcastEntityEvent(4);
-                    $this->getTargetPlayer()->attack($event);
+
+                if ($this->canAttack()) {
+                    if (Server::getInstance()->getTick() - $this->potTick >= 5) {
+                        $event = new EntityDamageByEntityEvent($this, $this->getTargetPlayer(), EntityDamageEvent::CAUSE_ENTITY_ATTACK, $this->getInventory()->getItemInHand() instanceof Sword ? $this->getInventory()->getItemInHand()->getAttackPoints() : 0.5);
+                        $this->broadcastEntityEvent(4);
+                        $this->getTargetPlayer()->attack($event);
+                    }
                 }
             }
         }
+
+    }
+
+    public function canAttack(): bool{
+
+        if(mt_rand(0, 100) <= $this->accuracy){
+            return true;
+        } else {
+            return false;
+        }
+
     }
 
     public function pearl($agro = false) : void{
@@ -273,6 +303,10 @@ class Bot extends Human{
 
     public function getRemainingPots() : int{
         return $this->potionsRemaining;
+    }
+
+    public function setDisabled(bool $bool){
+        $this->disabled = $bool;
     }
 
 }

@@ -1,5 +1,7 @@
 <?php
 
+namespace Party;
+
 use pocketmine\Player;
 
 class Party{
@@ -45,22 +47,28 @@ class Party{
     }
 
     /**
-     * @param Player $player
+     * @param Player|array $player
      * Adds player to the party.
      */
-    public function addPlayer(Player $player)
+    public function addPlayer(Player|array $player)
     {
 
-    $this->players[] = $player;
+        if(is_array($player)) {
+            foreach($player as $players) {
+                $this->players[] = $players;
+            }
+        } else {
+            $this->players[] = $player;
+        }
 
     }
 
     /**
-     * @param Player $player
+     * @param Player|array $player
      * Removes player from the party.
      */
 
-    public function removePlayer(Player $player)
+    public function removePlayer(Player|array $player)
     {
         if (is_array($player)) {
             foreach ($player as $players)

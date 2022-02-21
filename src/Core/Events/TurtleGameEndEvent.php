@@ -13,7 +13,7 @@ class TurtleGameEndEvent extends PluginEvent{
     public $loser;
     public $game;
 
-    public function __construct(array $players, Player $winner, Player $loser, Game $game){
+    public function __construct(array $players, $winner, $loser, Game $game){
      parent::__construct(self::getPlugin());
      $this->players = $players;
      $this->winner = $winner;

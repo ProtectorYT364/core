@@ -10,7 +10,8 @@ use pocketmine\item\Item;
 use pocketmine\Player;
 use pocketmine\item\enchantment\EnchantmentInstance;
 use pocketmine\item\enchantment\Enchantment;
-use Core\Game\{Games, Modes};
+use Core\Game\ModesManager as Modes;
+use Core\Game\GamesManager as Games;
 use pocketmine\utils\TextFormat;
 
 class GiveItems{
@@ -18,14 +19,16 @@ class GiveItems{
         $this->plugin = $plugin;
     }
 
-    public static function giveKit(string $kit, TurtlePlayer $p){
+    public static function giveKit(string $kit, $p){
+
         if($p->getGame() == Games::FFA) {
             if ($kit == Modes::FIST) {
                 $p->getInventory()->setItem(7, Item::get(364, 0, 64));
             } elseif ($kit == Modes::SUMO) {
                 $p->getInventory()->setItem(7, Item::get(364, 0, 64));
             }
-        }elseif($p->getGame() == Games::KBFFA){
+
+        } elseif ($p->getGame() == Games::KBFFA){
 
             $sword = Item::get(268, 0, 1);
             $stick = Item::get(280, 0, 1);
@@ -89,7 +92,7 @@ class GiveItems{
             $p->getArmorInventory()->setLeggings($pant);
             $p->getArmorInventory()->setBoots($boot);
 
-        }elseif($p->getGame() == "lobby") {
+        }elseif($p->getGame() == null) {
             //create items
             $playMenu = Item::get(Item::COMPASS, 0, 1);
 
@@ -101,6 +104,27 @@ class GiveItems{
 
             //give item
             $p->getInventory()->addItem($playMenu);
+
+        }elseif($p->getGame()->getType() == Games::BOT){
+            if($p->getGame()->getMode() == Modes::NODEBUFF){
+
+
+                $bot = $p;
+
+                for($i = 0; $i <= 35; ++$i){
+                    $bot->getInventory()->setItem($i, Item::get(Item::SPLASH_POTION, 22, 1));
+                }
+
+                $sword = Item::get(Item::DIAMOND_SWORD);
+                $sword->addEnchantment(new EnchantmentInstance(Enchantment::getEnchantment(Enchantment::FIRE_ASPECT)));
+                $bot->getInventory()->setItem(0, $sword);
+                $bot->getInventory()->setItem(1, Item::get(Item::ENDER_PEARL, 0, 16));
+                $bot->getArmorInventory()->setHelmet(Item::get(Item::DIAMOND_HELMET));
+                $bot->getArmorInventory()->setChestplate(Item::get(Item::DIAMOND_CHESTPLATE));
+                $bot->getArmorInventory()->setLeggings(Item::get(Item::DIAMOND_LEGGINGS));
+                $bot->getArmorInventory()->setBoots(Item::get(Item::DIAMOND_BOOTS));
+                $bot->getInventory()->setHeldItemIndex(0);
+            }
         }
     }
 }
